@@ -8,32 +8,34 @@
     label { font-weight: bold; display: block; margin-top: 12px; }
     input, textarea, select { width: 100%; padding: 6px; margin-top: 4px; }
     .active-field { background-color: #e6ffed; border: 2px solid #38a169; }
-    #statusMessage { margin-top: 10px; }
-    button { padding: 6px 12px; }
-    #speechBtn.active { background-color: #38a169; color: white; }
+    #speechStatus { margin-top: 10px; font-weight: bold; }
+    #transcript { margin-top: 5px; font-style: italic; }
+    #toggleSpeech { padding: 6px 12px; background-color: #38a169; color: white; border: none; cursor: pointer; }
+    #toggleSpeech.recording { background-color: #e53e3e; }
   </style>
 </head>
 <body>
   <h2>Testbericht-Felder (Airtable Sync mit Sprachsteuerung)</h2>
 
-  <button id="speechBtn">🎙 Spracheingabe starten</button>
-  <div id="statusMessage"></div>
+  <button id="toggleSpeech">🎙 Spracheingabe starten</button>
+  <div id="speechStatus">🛑 Spracheingabe inaktiv</div>
+  <div id="transcript"></div>
 
   <form id="airtableForm">
-    <label for="fldgfegUsXpOxuVnT">Report</label>
-    <input type="text" id="fldgfegUsXpOxuVnT">
+    <label for="report">Report</label>
+    <input type="text" id="report">
 
-    <label for="fldIo9EAPIMXYGYxs">Project</label>
-    <input type="text" id="fldIo9EAPIMXYGYxs">
+    <label for="project">Project</label>
+    <input type="text" id="project">
 
-    <label for="fldQAV4RIP33nxH0y">Test</label>
-    <input type="text" id="fldQAV4RIP33nxH0y">
+    <label for="test">Test</label>
+    <input type="text" id="test">
 
-    <label for="fldmHouwqjRyZw1z1">DVP</label>
-    <input type="text" id="fldmHouwqjRyZw1z1">
+    <label for="dvp">DVP</label>
+    <input type="text" id="dvp">
 
-    <label for="fldZ56NkIyj8kSO3E">Test samples</label>
-    <input type="text" id="fldZ56NkIyj8kSO3E">
+    <label for="samples">Test samples</label>
+    <input type="text" id="samples">
 
     <br><br>
     <button type="submit">An Airtable senden</button>
@@ -41,101 +43,86 @@
   </form>
 
   <script>
-    let currentField = null;
-    const statusMessage = document.getElementById("statusMessage");
-
     const fieldMap = {
-      "report": "fldgfegUsXpOxuVnT",
-      "projekt": "fldIo9EAPIMXYGYxs",
-      "project": "fldIo9EAPIMXYGYxs",
-      "test": "fldQAV4RIP33nxH0y",
-      "dvp": "fldmHouwqjRyZw1z1",
-      "test samples": "fldZ56NkIyj8kSO3E"
+      'report': 'report',
+      'project': 'project',
+      'projekt': 'project',
+      'test': 'test',
+      'dvp': 'dvp',
+      'samples': 'samples',
+      'test samples': 'samples'
     };
 
-    function setActiveField(name) {
-      if (currentField) currentField.classList.remove("active-field");
-      const fieldId = fieldMap[name.toLowerCase()];
-      if (!fieldId) return false;
-      const el = document.getElementById(fieldId);
-      if (el) {
-        el.focus();
-        el.classList.add("active-field");
-        currentField = el;
-        return true;
+    let recognition;
+    let isRecording = false;
+    const toggleBtn = document.getElementById('toggleSpeech');
+    const statusDiv = document.getElementById('speechStatus');
+    const transcriptDiv = document.getElementById('transcript');
+
+    toggleBtn.addEventListener('click', () => {
+      if (!isRecording) {
+        startRecognition();
+      } else {
+        stopRecognition();
       }
-      return false;
-    }
-
-    async function sendAudioToAPI(audioBlob) {
-      const formData = new FormData();
-      formData.append("audio", audioBlob, "speech.wav");
-      const res = await fetch("/api/speech", { method: "POST", body: formData });
-      const data = await res.json();
-      return data.text;
-    }
-
-    async function startRecording() {
-      const btn = document.getElementById("speechBtn");
-      btn.textContent = "🔴 Spracheingabe stoppen";
-      btn.classList.add("active");
-      statusMessage.innerHTML = "🎤 Aufnahme läuft...";
-
-      const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
-      const mediaRecorder = new MediaRecorder(stream);
-      const chunks = [];
-
-      mediaRecorder.ondataavailable = e => chunks.push(e.data);
-
-      mediaRecorder.onstop = async () => {
-        const audioBlob = new Blob(chunks, { type: 'audio/wav' });
-        const text = await sendAudioToAPI(audioBlob);
-        statusMessage.innerHTML = `✅ Erkannt: ${text}`;
-
-        const wasSet = setActiveField(text);
-        if (!wasSet && currentField) {
-          currentField.value += (currentField.value ? " " : "") + text;
-        }
-
-        stream.getTracks().forEach(track => track.stop());
-        btn.textContent = "🎙 Spracheingabe starten";
-        btn.classList.remove("active");
-      };
-
-      btn.onclick = () => {
-        mediaRecorder.stop();
-        btn.onclick = startRecording;
-      };
-
-      mediaRecorder.start();
-    }
-
-    document.getElementById("speechBtn").onclick = startRecording;
-
-    document.getElementById("airtableForm").addEventListener("submit", async (e) => {
-      e.preventDefault();
-      const fields = {};
-      document.querySelectorAll("input, textarea, select").forEach(input => {
-        if (input.value) fields[input.id] = input.value;
-      });
-
-      const payload = {
-        records: [{ id: "reck6u6zEVw3zhYoi", fields }],
-        typecast: true
-      };
-
-      const res = await fetch("https://api.airtable.com/v0/appzwNxopAPU5CEG7/tblsRZ7ocjdhRp48T", {
-        method: "PATCH",
-        headers: {
-          Authorization: "Bearer patWnOn1yz2o0UIDX.ddf441ba81728498f83988a569566b17048c1571f3f9de1bfad217f649122a79",
-          "Content-Type": "application/json"
-        },
-        body: JSON.stringify(payload)
-      });
-
-      const result = await res.json();
-      document.getElementById("status").textContent = res.ok ? "✅ Erfolgreich an Airtable gesendet!" : `❌ Fehler: ${JSON.stringify(result)}`;
     });
+
+    function startRecognition() {
+      const SpeechRecognition = window.SpeechRecognition || window.webkitSpeechRecognition;
+      recognition = new SpeechRecognition();
+      recognition.lang = 'de-DE';
+      recognition.continuous = false;
+      recognition.interimResults = false;
+
+      recognition.onstart = () => {
+        isRecording = true;
+        toggleBtn.textContent = '🔴 Spracheingabe stoppen';
+        toggleBtn.classList.add('recording');
+        statusDiv.textContent = '🎤 Aufnahme läuft...';
+      };
+
+      recognition.onresult = async (event) => {
+        const text = event.results[0][0].transcript.toLowerCase();
+        transcriptDiv.textContent = `🎧 Verstanden: ${text}`;
+        await processCommand(text);
+      };
+
+      recognition.onerror = (event) => {
+        transcriptDiv.textContent = `❌ Fehler: ${event.error}`;
+        stopRecognition();
+      };
+
+      recognition.onend = () => {
+        isRecording = false;
+        toggleBtn.textContent = '🎙 Spracheingabe starten';
+        toggleBtn.classList.remove('recording');
+        statusDiv.textContent = '🛑 Spracheingabe inaktiv';
+      };
+
+      recognition.start();
+    }
+
+    function stopRecognition() {
+      if (recognition) recognition.stop();
+    }
+
+    async function processCommand(text) {
+      const parts = text.split(':');
+      if (parts.length < 2) return;
+      const command = parts[0].trim();
+      const value = parts[1].trim();
+      const field = fieldMap[command];
+
+      if (field) {
+        document.querySelectorAll('input').forEach(input => input.classList.remove('active-field'));
+        const el = document.getElementById(field);
+        if (el) {
+          el.focus();
+          el.classList.add('active-field');
+          el.value = value;
+        }
+      }
+    }
   </script>
 </body>
 </html>
