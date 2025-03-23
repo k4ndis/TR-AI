@@ -7,16 +7,17 @@
     body { font-family: Arial, sans-serif; margin: 20px; }
     label { font-weight: bold; display: block; margin-top: 12px; }
     input, textarea, select { width: 100%; padding: 6px; margin-top: 4px; }
-    .highlight { background-color: #c6f6d5; transition: background-color 0.3s; }
-    #status { margin-top: 10px; font-weight: bold; }
-    .listening { background-color: #48bb78; color: white; }
+    .active-field { background-color: #e6ffed; border: 2px solid #38a169; }
+    #statusMessage { margin-top: 10px; }
+    button { padding: 6px 12px; }
+    #speechBtn.active { background-color: #38a169; color: white; }
   </style>
 </head>
 <body>
   <h2>Testbericht-Felder (Airtable Sync mit Sprachsteuerung)</h2>
 
-  <button id="toggleSpeech">🎙️ Spracheingabe starten</button>
-  <div id="status"></div>
+  <button id="speechBtn">🎙 Spracheingabe starten</button>
+  <div id="statusMessage"></div>
 
   <form id="airtableForm">
     <label for="fldgfegUsXpOxuVnT">Report</label>
@@ -36,92 +37,85 @@
 
     <br><br>
     <button type="submit">An Airtable senden</button>
+    <div id="status"></div>
   </form>
 
   <script>
+    let currentField = null;
+    const statusMessage = document.getElementById("statusMessage");
+
     const fieldMap = {
       "report": "fldgfegUsXpOxuVnT",
       "projekt": "fldIo9EAPIMXYGYxs",
       "project": "fldIo9EAPIMXYGYxs",
       "test": "fldQAV4RIP33nxH0y",
       "dvp": "fldmHouwqjRyZw1z1",
-      "test samples": "fldZ56NkIyj8kSO3E",
+      "test samples": "fldZ56NkIyj8kSO3E"
     };
 
-    let recognizing = false;
-    let recognition;
-    let activeField = null;
-
-    const statusDiv = document.getElementById("status");
-    const toggleBtn = document.getElementById("toggleSpeech");
-
-    function highlightField(id) {
-      document.querySelectorAll("input").forEach(el => el.classList.remove("highlight"));
-      const el = document.getElementById(id);
+    function setActiveField(name) {
+      if (currentField) currentField.classList.remove("active-field");
+      const fieldId = fieldMap[name.toLowerCase()];
+      if (!fieldId) return false;
+      const el = document.getElementById(fieldId);
       if (el) {
-        el.classList.add("highlight");
         el.focus();
-        activeField = el;
+        el.classList.add("active-field");
+        currentField = el;
+        return true;
       }
+      return false;
     }
 
-    function startSpeechRecognition() {
-      if (!('webkitSpeechRecognition' in window)) {
-        alert("Web Speech API wird nicht unterstützt 😢");
-        return;
-      }
-
-      recognition = new webkitSpeechRecognition();
-      recognition.lang = 'de-DE';
-      recognition.continuous = true;
-      recognition.interimResults = false;
-
-      recognition.onstart = () => {
-        recognizing = true;
-        toggleBtn.classList.add("listening");
-        toggleBtn.textContent = "🎙️ Spracheingabe stoppen";
-      };
-
-      recognition.onend = () => {
-        recognizing = false;
-        toggleBtn.classList.remove("listening");
-        toggleBtn.textContent = "🎙️ Spracheingabe starten";
-      };
-
-      recognition.onresult = (event) => {
-        const text = event.results[event.results.length - 1][0].transcript.trim().toLowerCase();
-        statusDiv.innerHTML = `🎧 <b>Erkannt:</b> ${text}`;
-
-        // Feldsteuerung erkennen
-        for (const key in fieldMap) {
-          if (text.includes(key)) {
-            highlightField(fieldMap[key]);
-            return;
-          }
-        }
-
-        // Inhalt einfügen, wenn Feld aktiv
-        if (activeField) {
-          activeField.value += (activeField.value ? " " : "") + text;
-        }
-      };
-
-      recognition.start();
+    async function sendAudioToAPI(audioBlob) {
+      const formData = new FormData();
+      formData.append("audio", audioBlob, "speech.wav");
+      const res = await fetch("/api/speech", { method: "POST", body: formData });
+      const data = await res.json();
+      return data.text;
     }
 
-    toggleBtn.addEventListener("click", () => {
-      if (recognizing) {
-        recognition.stop();
-      } else {
-        startSpeechRecognition();
-      }
-    });
+    async function startRecording() {
+      const btn = document.getElementById("speechBtn");
+      btn.textContent = "🔴 Spracheingabe stoppen";
+      btn.classList.add("active");
+      statusMessage.innerHTML = "🎤 Aufnahme läuft...";
 
-    // Airtable-Submit
+      const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
+      const mediaRecorder = new MediaRecorder(stream);
+      const chunks = [];
+
+      mediaRecorder.ondataavailable = e => chunks.push(e.data);
+
+      mediaRecorder.onstop = async () => {
+        const audioBlob = new Blob(chunks, { type: 'audio/wav' });
+        const text = await sendAudioToAPI(audioBlob);
+        statusMessage.innerHTML = `✅ Erkannt: ${text}`;
+
+        const wasSet = setActiveField(text);
+        if (!wasSet && currentField) {
+          currentField.value += (currentField.value ? " " : "") + text;
+        }
+
+        stream.getTracks().forEach(track => track.stop());
+        btn.textContent = "🎙 Spracheingabe starten";
+        btn.classList.remove("active");
+      };
+
+      btn.onclick = () => {
+        mediaRecorder.stop();
+        btn.onclick = startRecording;
+      };
+
+      mediaRecorder.start();
+    }
+
+    document.getElementById("speechBtn").onclick = startRecording;
+
     document.getElementById("airtableForm").addEventListener("submit", async (e) => {
       e.preventDefault();
       const fields = {};
-      document.querySelectorAll("input").forEach(input => {
+      document.querySelectorAll("input, textarea, select").forEach(input => {
         if (input.value) fields[input.id] = input.value;
       });
 
@@ -140,7 +134,7 @@
       });
 
       const result = await res.json();
-      statusDiv.innerHTML = res.ok ? "✅ Erfolgreich an Airtable gesendet!" : `❌ Fehler: ${JSON.stringify(result)}`;
+      document.getElementById("status").textContent = res.ok ? "✅ Erfolgreich an Airtable gesendet!" : `❌ Fehler: ${JSON.stringify(result)}`;
     });
   </script>
 </body>
