@@ -1,0 +1,147 @@
+<!DOCTYPE html>
+<html lang="de">
+<head>
+  <meta charset="UTF-8">
+  <title>Testbericht-Felder (Airtable Sync mit Sprachsteuerung)</title>
+  <style>
+    body { font-family: Arial, sans-serif; margin: 20px; }
+    label { font-weight: bold; display: block; margin-top: 12px; }
+    input, textarea, select { width: 100%; padding: 6px; margin-top: 4px; }
+    .highlight { background-color: #c6f6d5; transition: background-color 0.3s; }
+    #status { margin-top: 10px; font-weight: bold; }
+    .listening { background-color: #48bb78; color: white; }
+  </style>
+</head>
+<body>
+  <h2>Testbericht-Felder (Airtable Sync mit Sprachsteuerung)</h2>
+
+  <button id="toggleSpeech">🎙️ Spracheingabe starten</button>
+  <div id="status"></div>
+
+  <form id="airtableForm">
+    <label for="fldgfegUsXpOxuVnT">Report</label>
+    <input type="text" id="fldgfegUsXpOxuVnT">
+
+    <label for="fldIo9EAPIMXYGYxs">Project</label>
+    <input type="text" id="fldIo9EAPIMXYGYxs">
+
+    <label for="fldQAV4RIP33nxH0y">Test</label>
+    <input type="text" id="fldQAV4RIP33nxH0y">
+
+    <label for="fldmHouwqjRyZw1z1">DVP</label>
+    <input type="text" id="fldmHouwqjRyZw1z1">
+
+    <label for="fldZ56NkIyj8kSO3E">Test samples</label>
+    <input type="text" id="fldZ56NkIyj8kSO3E">
+
+    <br><br>
+    <button type="submit">An Airtable senden</button>
+  </form>
+
+  <script>
+    const fieldMap = {
+      "report": "fldgfegUsXpOxuVnT",
+      "projekt": "fldIo9EAPIMXYGYxs",
+      "project": "fldIo9EAPIMXYGYxs",
+      "test": "fldQAV4RIP33nxH0y",
+      "dvp": "fldmHouwqjRyZw1z1",
+      "test samples": "fldZ56NkIyj8kSO3E",
+    };
+
+    let recognizing = false;
+    let recognition;
+    let activeField = null;
+
+    const statusDiv = document.getElementById("status");
+    const toggleBtn = document.getElementById("toggleSpeech");
+
+    function highlightField(id) {
+      document.querySelectorAll("input").forEach(el => el.classList.remove("highlight"));
+      const el = document.getElementById(id);
+      if (el) {
+        el.classList.add("highlight");
+        el.focus();
+        activeField = el;
+      }
+    }
+
+    function startSpeechRecognition() {
+      if (!('webkitSpeechRecognition' in window)) {
+        alert("Web Speech API wird nicht unterstützt 😢");
+        return;
+      }
+
+      recognition = new webkitSpeechRecognition();
+      recognition.lang = 'de-DE';
+      recognition.continuous = true;
+      recognition.interimResults = false;
+
+      recognition.onstart = () => {
+        recognizing = true;
+        toggleBtn.classList.add("listening");
+        toggleBtn.textContent = "🎙️ Spracheingabe stoppen";
+      };
+
+      recognition.onend = () => {
+        recognizing = false;
+        toggleBtn.classList.remove("listening");
+        toggleBtn.textContent = "🎙️ Spracheingabe starten";
+      };
+
+      recognition.onresult = (event) => {
+        const text = event.results[event.results.length - 1][0].transcript.trim().toLowerCase();
+        statusDiv.innerHTML = `🎧 <b>Erkannt:</b> ${text}`;
+
+        // Feldsteuerung erkennen
+        for (const key in fieldMap) {
+          if (text.includes(key)) {
+            highlightField(fieldMap[key]);
+            return;
+          }
+        }
+
+        // Inhalt einfügen, wenn Feld aktiv
+        if (activeField) {
+          activeField.value += (activeField.value ? " " : "") + text;
+        }
+      };
+
+      recognition.start();
+    }
+
+    toggleBtn.addEventListener("click", () => {
+      if (recognizing) {
+        recognition.stop();
+      } else {
+        startSpeechRecognition();
+      }
+    });
+
+    // Airtable-Submit
+    document.getElementById("airtableForm").addEventListener("submit", async (e) => {
+      e.preventDefault();
+      const fields = {};
+      document.querySelectorAll("input").forEach(input => {
+        if (input.value) fields[input.id] = input.value;
+      });
+
+      const payload = {
+        records: [{ id: "reck6u6zEVw3zhYoi", fields }],
+        typecast: true
+      };
+
+      const res = await fetch("https://api.airtable.com/v0/appzwNxopAPU5CEG7/tblsRZ7ocjdhRp48T", {
+        method: "PATCH",
+        headers: {
+          Authorization: "Bearer patWnOn1yz2o0UIDX.ddf441ba81728498f83988a569566b17048c1571f3f9de1bfad217f649122a79",
+          "Content-Type": "application/json"
+        },
+        body: JSON.stringify(payload)
+      });
+
+      const result = await res.json();
+      statusDiv.innerHTML = res.ok ? "✅ Erfolgreich an Airtable gesendet!" : `❌ Fehler: ${JSON.stringify(result)}`;
+    });
+  </script>
+</body>
+</html>
